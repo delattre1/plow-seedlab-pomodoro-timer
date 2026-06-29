@@ -1,6 +1,0 @@
-node_modules/
-.DS_Store
-# generated artifacts at repo root; proof/ keeps an example copy on purpose.
-/pomodoro-timer.html
-/verify*.mjs
-/package*.json
