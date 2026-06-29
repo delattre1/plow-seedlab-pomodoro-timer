@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pomodoro Timer</title>
+<style>
+  :root {
+    --bg: #1a1320;
+    --card: #251a2e;
+    --work: #e05c5c;
+    --short: #4fb286;
+    --long: #5c8de0;
+    --text: #f3eef7;
+    --muted: #a99cb5;
+    --accent: var(--work);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #2c1f38, var(--bg));
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100%;
+    padding: 24px;
+  }
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--card);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 20px;
+    padding: 32px 28px 28px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.45);
+    text-align: center;
+  }
+  #phase {
+    display: inline-block;
+    font-size: .8rem;
+    font-weight: 700;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.06);
+    color: var(--accent);
+  }
+  #phase[data-phase="work"]        { --accent: var(--work);  color: var(--work);  }
+  #phase[data-phase="short-break"] { --accent: var(--short); color: var(--short); }
+  #phase[data-phase="long-break"]  { --accent: var(--long);  color: var(--long);  }
+  #time-remaining {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: clamp(4.2rem, 22vw, 6.5rem);
+    line-height: 1.05;
+    margin: 18px 0 6px;
+    letter-spacing: -.02em;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: .9rem;
+    margin-bottom: 24px;
+  }
+  .meta b { color: var(--text); font-weight: 700; }
+  #status { font-size: .8rem; }
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+  .controls button {
+    flex: 1;
+    font: inherit;
+    font-weight: 600;
+    color: var(--text);
+    background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.1);
+    padding: 13px 0;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: transform .05s ease, background .15s ease;
+  }
+  .controls button:hover { background: rgba(255,255,255,.13); }
+  .controls button:active { transform: translateY(1px); }
+  #start { background: var(--accent); border-color: transparent; color: #1a1320; }
+  #start:hover { filter: brightness(1.08); background: var(--accent); }
+  .settings {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding-top: 18px;
+  }
+  .settings label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: .72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+  .settings input {
+    font: inherit;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text);
+    background: rgba(0,0,0,.25);
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 10px;
+    padding: 10px 6px;
+    width: 100%;
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <span id="phase" data-phase="work">Work</span>
+    <div id="time-remaining" data-seconds="1500">25:00</div>
+    <p class="meta">
+      Sessions done: <b id="session-count" data-value="0">0</b>
+      &nbsp;·&nbsp;
+      <span id="status" data-running="false">Paused</span>
+    </p>
+    <div class="controls">
+      <button id="start" type="button">Start</button>
+      <button id="pause" type="button">Pause</button>
+      <button id="reset" type="button">Reset</button>
+    </div>
+    <div class="settings">
+      <label>Work min
+        <input id="work-min" type="number" min="1" step="1" value="25">
+      </label>
+      <label>Short min
+        <input id="short-break-min" type="number" min="1" step="1" value="5">
+      </label>
+      <label>Long min
+        <input id="long-break-min" type="number" min="1" step="1" value="15">
+      </label>
+    </div>
+  </main>
+
+<script>
+(function () {
+  "use strict";
+
+  var LONG_EVERY = 4;
+
+  var els = {
+    time: document.getElementById("time-remaining"),
+    phase: document.getElementById("phase"),
+    count: document.getElementById("session-count"),
+    status: document.getElementById("status"),
+    start: document.getElementById("start"),
+    pause: document.getElementById("pause"),
+    reset: document.getElementById("reset"),
+    work: document.getElementById("work-min"),
+    short: document.getElementById("short-break-min"),
+    long: document.getElementById("long-break-min")
+  };
+
+  var PHASE_LABEL = {
+    "work": "Work",
+    "short-break": "Short Break",
+    "long-break": "Long Break"
+  };
+
+  // ---- duration helpers (read from inputs in minutes -> seconds) ----
+  function minToSecs(input, fallback) {
+    var v = parseInt(input.value, 10);
+    if (!isFinite(v) || v < 1) v = fallback;
+    return v * 60;
+  }
+  function workSecs()  { return minToSecs(els.work, 25); }
+  function shortSecs() { return minToSecs(els.short, 5); }
+  function longSecs()  { return minToSecs(els.long, 15); }
+
+  // ---- state ----
+  var state = {
+    phase: "work",
+    seconds: workSecs(),
+    sessions: 0,
+    running: false
+  };
+
+  // ---- rendering ----
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function fmt(total) {
+    var m = Math.floor(total / 60);
+    var s = total % 60;
+    return pad2(m) + ":" + pad2(s);
+  }
+  function render() {
+    els.time.setAttribute("data-seconds", String(state.seconds));
+    els.time.textContent = fmt(state.seconds);
+    els.phase.setAttribute("data-phase", state.phase);
+    els.phase.textContent = PHASE_LABEL[state.phase];
+    els.count.setAttribute("data-value", String(state.sessions));
+    els.count.textContent = String(state.sessions);
+    els.status.setAttribute("data-running", state.running ? "true" : "false");
+    els.status.textContent = state.running ? "Running" : "Paused";
+  }
+
+  // ---- fixed time model ----
+  function completePhase() {
+    if (state.phase === "work") {
+      state.sessions += 1;
+      if (state.sessions % LONG_EVERY === 0) {
+        state.phase = "long-break";
+        state.seconds = longSecs();
+      } else {
+        state.phase = "short-break";
+        state.seconds = shortSecs();
+      }
+    } else {
+      // short-break or long-break -> work (no session increment)
+      state.phase = "work";
+      state.seconds = workSecs();
+    }
+    // auto-start next phase: running stays true
+  }
+
+  function step() {
+    if (!state.running) return;
+    if (state.seconds > 0) {
+      state.seconds -= 1;
+    }
+    if (state.seconds === 0) {
+      completePhase();
+    }
+  }
+
+  function tick(n) {
+    if (!state.running) return;
+    n = Math.floor(n);
+    for (var i = 0; i < n; i++) {
+      if (!state.running) break;
+      step();
+    }
+    render();
+  }
+
+  // ---- live human countdown (separate from test path) ----
+  var interval = null;
+  function startInterval() {
+    if (interval !== null) return;
+    interval = setInterval(function () {
+      if (!state.running) return;
+      step();
+      render();
+    }, 1000);
+  }
+  function stopInterval() {
+    if (interval !== null) {
+      clearInterval(interval);
+      interval = null;
+    }
+  }
+
+  // ---- controls ----
+  function start() {
+    state.running = true;
+    startInterval();
+    render();
+  }
+  function pause() {
+    state.running = false;
+    stopInterval();
+    render();
+  }
+  function reset() {
+    state.running = false;
+    stopInterval();
+    state.phase = "work";
+    state.seconds = workSecs();
+    state.sessions = 0;
+    render();
+  }
+
+  els.start.addEventListener("click", start);
+  els.pause.addEventListener("click", pause);
+  els.reset.addEventListener("click", reset);
+
+  // expose deterministic test hook + controls
+  window.pomodoro = {
+    start: start,
+    pause: pause,
+    reset: reset,
+    tick: tick
+  };
+
+  // initial render
+  render();
+})();
+</script>
+</body>
+</html>
